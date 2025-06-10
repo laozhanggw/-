@@ -1,0 +1,948 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://code.jquery.com https://unpkg.com https://d3js.org https://threejs.org https://cdn.plot.ly https://stackpath.bootstrapcdn.com https://maps.googleapis.com https://cdn.tailwindcss.com https://ajax.googleapis.com https://kit.fontawesome.com https://cdn.datatables.net https://maxcdn.bootstrapcdn.com https://code.highcharts.com https://tako-static-assets-production.s3.amazonaws.com https://www.youtube.com https://fonts.googleapis.com https://fonts.gstatic.com https://pfst.cf2.poecdn.net https://puc.poecdn.net https://i.imgur.com https://wikimedia.org https://*.icons8.com https://*.giphy.com https://picsum.photos https://images.unsplash.com; frame-src 'self' https://www.youtube.com https://trytako.com; child-src 'self'; manifest-src 'self'; worker-src 'self'; upgrade-insecure-requests; block-all-mixed-content;">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>网盘资料搜索系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#5D5CDE',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .file-icon {
+            width: 20px;
+            height: 20px;
+            margin-right: 8px;
+            flex-shrink: 0;
+        }
+        
+        .search-result-item:hover {
+            transform: translateY(-1px);
+            transition: transform 0.2s ease-in-out;
+        }
+        
+        .fade-in {
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .loading-spinner {
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #5D5CDE;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-white dark:bg-gray-900 min-h-screen transition-colors duration-300">
+    <!-- 导航栏 -->
+    <nav class="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <h1 class="text-xl font-bold text-gray-900 dark:text-white">网盘资料搜索系统</h1>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <button id="adminBtn" class="bg-primary text-white px-4 py-2 rounded-lg hover:bg-purple-600 transition-colors text-base">
+                        管理后台
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 主界面 -->
+    <div id="mainView" class="max-w-4xl mx-auto px-4 py-8">
+        <!-- 搜索区域 -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 mb-8">
+            <div class="text-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">搜索您的文件</h2>
+                <p class="text-gray-600 dark:text-gray-400">输入关键词快速定位文件在网盘中的位置</p>
+            </div>
+            
+            <div class="relative max-w-2xl mx-auto">
+                <input type="text" id="searchInput" placeholder="输入文件名关键词..." class="w-full px-4 py-3 text-base border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400">
+                <div id="loadingIndicator" class="absolute right-3 top-1/2 transform -translate-y-1/2 hidden">
+                    <div class="loading-spinner"></div>
+                </div>
+            </div>
+            
+            <div class="mt-4 text-center">
+                <p class="text-sm text-gray-500 dark:text-gray-400">
+                    已索引 <span id="fileCount" class="font-semibold text-primary">0</span> 个文件
+                </p>
+            </div>
+        </div>
+
+        <!-- 搜索结果 -->
+        <div id="searchResults" class="hidden">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                    搜索结果 (<span id="resultCount">0</span>)
+                </h3>
+                <div id="resultsList" class="space-y-3"></div>
+            </div>
+        </div>
+
+        <!-- 空状态提示 -->
+        <div id="emptyState" class="text-center py-12">
+            <div class="text-gray-400 dark:text-gray-500 mb-4">
+                <svg class="mx-auto h-16 w-16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                </svg>
+            </div>
+            <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-2">开始搜索文件</h3>
+            <p class="text-gray-500 dark:text-gray-400">在上方搜索框中输入关键词来查找文件</p>
+        </div>
+
+        <!-- 无结果状态 -->
+        <div id="noResults" class="hidden text-center py-12">
+            <div class="text-gray-400 dark:text-gray-500 mb-4">
+                <svg class="mx-auto h-16 w-16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.172 16.172a4 4 0 015.656 0M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                </svg>
+            </div>
+            <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-2">未找到相关文件</h3>
+            <p class="text-gray-500 dark:text-gray-400">请尝试其他关键词或检查拼写</p>
+        </div>
+    </div>
+
+    <!-- 管理后台 -->
+    <div id="adminView" class="hidden max-w-4xl mx-auto px-4 py-8">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">管理后台</h2>
+                <button id="backBtn" class="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 transition-colors text-base">
+                    返回搜索
+                </button>
+            </div>
+            
+            <!-- 路径映射设置 -->
+            <div class="mb-8">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">路径映射设置</h3>
+                
+                <!-- 网盘根路径 -->
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">网盘根路径</label>
+                    <div class="flex space-x-3">
+                        <input type="text" id="netdiskRootPath" placeholder="输入网盘根路径，如：A/" class="flex-1 px-4 py-2 text-base border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400">
+                    </div>
+                </div>
+                
+                <!-- 本地路径前缀 -->
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">本地路径前缀（需要替换的部分）</label>
+                    <div class="flex space-x-3">
+                        <input type="text" id="localPathPrefix" placeholder="如：BaiduNetdiskDownload\" class="flex-1 px-4 py-2 text-base border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400">
+                    </div>
+                </div>
+                
+                <div class="flex space-x-3 mb-4">
+                    <button id="savePathMapping" class="bg-primary text-white px-6 py-2 rounded-lg hover:bg-purple-600 transition-colors text-base">
+                        保存路径映射
+                    </button>
+                    <button id="testPathMapping" class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors text-base">
+                        测试转换
+                    </button>
+                </div>
+                
+                <div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg">
+                    <p class="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                        <strong>当前映射设置：</strong>
+                    </p>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">
+                        网盘根路径：<span id="currentNetdiskPath" class="font-semibold">未设置</span>
+                    </p>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">
+                        本地路径前缀：<span id="currentLocalPrefix" class="font-semibold">未设置</span>
+                    </p>
+                    <div id="pathMappingExample" class="mt-2 text-xs text-gray-500 dark:text-gray-400"></div>
+                </div>
+            </div>
+            
+            <!-- 文件索引管理 -->
+            <div class="mb-8">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">文件索引管理</h3>
+                
+                <!-- 路径格式选择 -->
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        选择导入格式
+                    </label>
+                    <div class="flex space-x-4 mb-3">
+                        <label class="flex items-center">
+                            <input type="radio" name="importFormat" value="windows" class="mr-2" checked="">
+                            <span class="text-sm text-gray-700 dark:text-gray-300">Windows路径格式</span>
+                        </label>
+                        <label class="flex items-center">
+                            <input type="radio" name="importFormat" value="json" class="mr-2">
+                            <span class="text-sm text-gray-700 dark:text-gray-300">JSON格式</span>
+                        </label>
+                    </div>
+                </div>
+                
+                <!-- Windows路径批量导入 -->
+                <div id="windowsPathImport" class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        批量导入Windows文件路径（每行一个路径）
+                    </label>
+                    <textarea id="windowsPathInput" rows="8" placeholder="BaiduNetdiskDownload\6月份7号到10号\25.06.10更新\低碳版村规民约.docx
+BaiduNetdiskDownload\6月份7号到10号\25.06.10更新\工作报告.xlsx
+BaiduNetdiskDownload\项目文档\会议记录.pdf" class="w-full px-4 py-3 text-base border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400"></textarea>
+                    <div class="flex justify-between items-center mt-3">
+                        <div class="flex space-x-3">
+                            <button id="importWindowsPaths" class="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition-colors text-base">
+                                导入Windows路径
+                            </button>
+                            <button id="convertPaths" class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors text-base">
+                                预览转换结果
+                            </button>
+                        </div>
+                        <button id="clearAll" class="bg-red-600 text-white px-6 py-2 rounded-lg hover:bg-red-700 transition-colors text-base">
+                            清空所有数据
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- JSON格式批量导入 -->
+                <div id="jsonPathImport" class="mb-6 hidden">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        批量导入文件路径 (JSON格式)
+                    </label>
+                    <textarea id="bulkImport" rows="8" placeholder="[{&quot;name&quot;: &quot;文档1.docx&quot;, &quot;path&quot;: &quot;B/C/D/文档1.docx&quot;, &quot;type&quot;: &quot;docx&quot;}, {&quot;name&quot;: &quot;表格1.xlsx&quot;, &quot;path&quot;: &quot;B/C/E/表格1.xlsx&quot;, &quot;type&quot;: &quot;xlsx&quot;}]" class="w-full px-4 py-3 text-base border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400"></textarea>
+                    <div class="flex justify-between items-center mt-3">
+                        <button id="importFiles" class="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition-colors text-base">
+                            导入JSON文件
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- 转换预览 -->
+                <div id="conversionPreview" class="hidden mb-6">
+                    <h4 class="text-md font-medium text-gray-900 dark:text-white mb-3">路径转换预览</h4>
+                    <div id="previewContent" class="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg max-h-64 overflow-y-auto text-sm"></div>
+                    <div class="flex space-x-3 mt-3">
+                        <button id="confirmConversion" class="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition-colors text-base">
+                            确认导入
+                        </button>
+                        <button id="cancelConversion" class="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600 transition-colors text-base">
+                            取消
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- 单个文件添加 -->
+                <div class="border-t border-gray-200 dark:border-gray-600 pt-6">
+                    <h4 class="text-md font-medium text-gray-900 dark:text-white mb-3">添加单个文件</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                        <input type="text" id="fileName" placeholder="文件名" class="px-4 py-2 text-base border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400">
+                        <input type="text" id="filePath" placeholder="相对路径（如：B/C/D/文件名.docx）" class="px-4 py-2 text-base border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400">
+                        <select id="fileType" class="px-4 py-2 text-base border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                            <option value="docx">Word (.docx)</option>
+                            <option value="pdf">PDF (.pdf)</option>
+                            <option value="pptx">PowerPoint (.pptx)</option>
+                            <option value="xlsx">Excel (.xlsx)</option>
+                            <option value="txt">文本 (.txt)</option>
+                            <option value="other">其他</option>
+                        </select>
+                    </div>
+                    <button id="addFile" class="bg-primary text-white px-6 py-2 rounded-lg hover:bg-purple-600 transition-colors text-base">
+                        添加文件
+                    </button>
+                </div>
+            </div>
+            
+            <!-- 当前文件列表 -->
+            <div>
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                    当前文件列表 (<span id="adminFileCount">0</span>)
+                </h3>
+                <div id="fileList" class="max-h-96 overflow-y-auto border border-gray-200 dark:border-gray-600 rounded-lg"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast 通知 -->
+    <div id="toast" class="fixed bottom-4 right-4 hidden bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg z-50">
+        <span id="toastMessage"></span>
+    </div>
+
+    <script>
+        // 深色模式检测和设置
+        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            document.documentElement.classList.add('dark');
+        }
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', event => {
+            if (event.matches) {
+                document.documentElement.classList.add('dark');
+            } else {
+                document.documentElement.classList.remove('dark');
+            }
+        });
+
+        // 应用状态管理
+        class FileSearchApp {
+            constructor() {
+                this.files = [];
+                this.rootPath = '';
+                this.loadData();
+                this.initEventListeners();
+                this.updateUI();
+            }
+
+            // 加载本地存储的数据
+            loadData() {
+                const savedFiles = localStorage.getItem('fileSearchFiles');
+                const savedRootPath = localStorage.getItem('fileSearchRootPath');
+                const savedLocalPrefix = localStorage.getItem('fileSearchLocalPrefix');
+                
+                if (savedFiles) {
+                    this.files = JSON.parse(savedFiles);
+                }
+                if (savedRootPath) {
+                    this.rootPath = savedRootPath;
+                }
+                if (savedLocalPrefix) {
+                    this.localPathPrefix = savedLocalPrefix;
+                }
+            }
+
+            // 保存数据到本地存储
+            saveData() {
+                localStorage.setItem('fileSearchFiles', JSON.stringify(this.files));
+                localStorage.setItem('fileSearchRootPath', this.rootPath);
+            }
+
+            // 初始化事件监听
+            initEventListeners() {
+                // 搜索功能
+                const searchInput = document.getElementById('searchInput');
+                let searchTimeout;
+                searchInput.addEventListener('input', (e) => {
+                    clearTimeout(searchTimeout);
+                    searchTimeout = setTimeout(() => {
+                        this.performSearch(e.target.value);
+                    }, 300);
+                });
+
+                // 管理后台切换
+                document.getElementById('adminBtn').addEventListener('click', () => {
+                    this.showAdminView();
+                });
+                document.getElementById('backBtn').addEventListener('click', () => {
+                    this.showMainView();
+                });
+
+                // 路径映射管理
+                document.getElementById('savePathMapping').addEventListener('click', () => {
+                    this.savePathMapping();
+                });
+                document.getElementById('testPathMapping').addEventListener('click', () => {
+                    this.testPathMapping();
+                });
+
+                // 导入格式切换
+                document.querySelectorAll('input[name="importFormat"]').forEach(radio => {
+                    radio.addEventListener('change', (e) => {
+                        this.toggleImportFormat(e.target.value);
+                    });
+                });
+
+                // Windows路径导入
+                document.getElementById('importWindowsPaths').addEventListener('click', () => {
+                    this.importWindowsPaths();
+                });
+                document.getElementById('convertPaths').addEventListener('click', () => {
+                    this.previewPathConversion();
+                });
+                document.getElementById('confirmConversion').addEventListener('click', () => {
+                    this.confirmPathConversion();
+                });
+                document.getElementById('cancelConversion').addEventListener('click', () => {
+                    this.cancelPathConversion();
+                });
+
+                // JSON文件管理
+                document.getElementById('importFiles').addEventListener('click', () => {
+                    this.importFiles();
+                });
+                document.getElementById('addFile').addEventListener('click', () => {
+                    this.addSingleFile();
+                });
+                document.getElementById('clearAll').addEventListener('click', () => {
+                    this.clearAllData();
+                });
+            }
+
+            // 执行搜索
+            performSearch(query) {
+                const loadingIndicator = document.getElementById('loadingIndicator');
+                const searchResults = document.getElementById('searchResults');
+                const emptyState = document.getElementById('emptyState');
+                const noResults = document.getElementById('noResults');
+
+                if (!query.trim()) {
+                    searchResults.classList.add('hidden');
+                    emptyState.classList.remove('hidden');
+                    noResults.classList.add('hidden');
+                    return;
+                }
+
+                loadingIndicator.classList.remove('hidden');
+                
+                setTimeout(() => {
+                    const results = this.searchFiles(query);
+                    this.displaySearchResults(results);
+                    loadingIndicator.classList.add('hidden');
+                    
+                    if (results.length > 0) {
+                        searchResults.classList.remove('hidden');
+                        emptyState.classList.add('hidden');
+                        noResults.classList.add('hidden');
+                    } else {
+                        searchResults.classList.add('hidden');
+                        emptyState.classList.add('hidden');
+                        noResults.classList.remove('hidden');
+                    }
+                }, 200);
+            }
+
+            // 搜索文件
+            searchFiles(query) {
+                const queryLower = query.toLowerCase();
+                return this.files.filter(file => 
+                    file.name.toLowerCase().includes(queryLower) ||
+                    file.path.toLowerCase().includes(queryLower)
+                );
+            }
+
+            // 显示搜索结果
+            displaySearchResults(results) {
+                const resultsList = document.getElementById('resultsList');
+                const resultCount = document.getElementById('resultCount');
+                
+                resultCount.textContent = results.length;
+                resultsList.innerHTML = '';
+
+                results.forEach(file => {
+                    const resultItem = this.createResultItem(file);
+                    resultsList.appendChild(resultItem);
+                });
+            }
+
+            // 创建搜索结果项
+            createResultItem(file) {
+                const div = document.createElement('div');
+                div.className = 'search-result-item p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:shadow-md transition-all cursor-pointer fade-in';
+                
+                const fullPath = this.rootPath + file.path;
+                const fileIcon = this.getFileIcon(file.type);
+                
+                div.innerHTML = `
+                    <div class="flex items-start space-x-3">
+                        <div class="file-icon">${fileIcon}</div>
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center space-x-2 mb-1">
+                                <h4 class="text-lg font-medium text-gray-900 dark:text-white truncate">${file.name}</h4>
+                                <span class="px-2 py-1 text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded">${file.type.toUpperCase()}</span>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <p class="text-sm text-gray-600 dark:text-gray-400 truncate flex-1">${fullPath}</p>
+                                <button 
+                                    onclick="app.copyPath('${fullPath}')" 
+                                    class="text-primary hover:text-purple-600 text-sm font-medium transition-colors"
+                                    title="复制路径"
+                                >
+                                    复制
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                return div;
+            }
+
+            // 获取文件图标
+            getFileIcon(type) {
+                const icons = {
+                    'docx': '📄',
+                    'pdf': '📕',
+                    'pptx': '📊',
+                    'xlsx': '📈',
+                    'txt': '📝',
+                    'other': '📎'
+                };
+                return icons[type] || icons['other'];
+            }
+
+            // 复制路径到剪贴板
+            copyPath(path) {
+                if (navigator.clipboard) {
+                    navigator.clipboard.writeText(path).then(() => {
+                        this.showToast('路径已复制到剪贴板');
+                    });
+                } else {
+                    // 降级方案
+                    const textArea = document.createElement('textarea');
+                    textArea.value = path;
+                    document.body.appendChild(textArea);
+                    textArea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textArea);
+                    this.showToast('路径已复制到剪贴板');
+                }
+            }
+
+            // 显示管理后台
+            showAdminView() {
+                document.getElementById('mainView').classList.add('hidden');
+                document.getElementById('adminView').classList.remove('hidden');
+                this.updateAdminUI();
+            }
+
+            // 显示主界面
+            showMainView() {
+                document.getElementById('mainView').classList.remove('hidden');
+                document.getElementById('adminView').classList.add('hidden');
+                this.updateUI();
+            }
+
+            // 保存路径映射设置
+            savePathMapping() {
+                const netdiskRootPath = document.getElementById('netdiskRootPath').value.trim();
+                const localPathPrefix = document.getElementById('localPathPrefix').value.trim();
+                
+                if (!netdiskRootPath) {
+                    this.showToast('请输入网盘根路径', 'error');
+                    return;
+                }
+                
+                this.rootPath = netdiskRootPath.endsWith('/') ? netdiskRootPath : netdiskRootPath + '/';
+                this.localPathPrefix = localPathPrefix;
+                
+                // 保存到本地存储
+                localStorage.setItem('fileSearchRootPath', this.rootPath);
+                localStorage.setItem('fileSearchLocalPrefix', this.localPathPrefix);
+                
+                this.updateAdminUI();
+                this.showToast('路径映射已保存');
+            }
+
+            // 测试路径映射
+            testPathMapping() {
+                const testPath = 'BaiduNetdiskDownload\\6月份7号到10号\\25.06.10更新\\低碳版村规民约.docx';
+                const converted = this.convertWindowsPath(testPath);
+                
+                if (converted) {
+                    this.showToast(`测试转换成功：${this.rootPath}${converted.path}`, 'success');
+                } else {
+                    this.showToast('请先设置路径映射', 'error');
+                }
+            }
+
+            // 切换导入格式
+            toggleImportFormat(format) {
+                const windowsPathImport = document.getElementById('windowsPathImport');
+                const jsonPathImport = document.getElementById('jsonPathImport');
+                
+                if (format === 'windows') {
+                    windowsPathImport.classList.remove('hidden');
+                    jsonPathImport.classList.add('hidden');
+                } else {
+                    windowsPathImport.classList.add('hidden');
+                    jsonPathImport.classList.remove('hidden');
+                }
+            }
+
+            // 导入Windows路径
+            importWindowsPaths() {
+                const pathText = document.getElementById('windowsPathInput').value.trim();
+                
+                if (!pathText) {
+                    this.showToast('请输入Windows文件路径', 'error');
+                    return;
+                }
+
+                if (!this.rootPath || !this.localPathPrefix) {
+                    this.showToast('请先设置路径映射', 'error');
+                    return;
+                }
+
+                try {
+                    const convertedFiles = this.parseWindowsPaths(pathText);
+                    
+                    if (convertedFiles.length === 0) {
+                        this.showToast('未找到有效的文件路径', 'error');
+                        return;
+                    }
+
+                    this.files = [...this.files, ...convertedFiles];
+                    this.saveData();
+                    this.updateAdminUI();
+                    this.updateUI();
+                    
+                    document.getElementById('windowsPathInput').value = '';
+                    this.showToast(`成功导入 ${convertedFiles.length} 个文件`);
+                    
+                } catch (error) {
+                    this.showToast('导入失败：' + error.message, 'error');
+                }
+            }
+
+            // 预览路径转换
+            previewPathConversion() {
+                const pathText = document.getElementById('windowsPathInput').value.trim();
+                
+                if (!pathText) {
+                    this.showToast('请输入Windows文件路径', 'error');
+                    return;
+                }
+
+                if (!this.rootPath || !this.localPathPrefix) {
+                    this.showToast('请先设置路径映射', 'error');
+                    return;
+                }
+
+                try {
+                    const convertedFiles = this.parseWindowsPaths(pathText);
+                    this.displayConversionPreview(convertedFiles);
+                } catch (error) {
+                    this.showToast('转换失败：' + error.message, 'error');
+                }
+            }
+
+            // 显示转换预览
+            displayConversionPreview(convertedFiles) {
+                const previewDiv = document.getElementById('conversionPreview');
+                const previewContent = document.getElementById('previewContent');
+                
+                if (convertedFiles.length === 0) {
+                    this.showToast('未找到有效的文件路径', 'error');
+                    return;
+                }
+
+                let previewHTML = `<div class="space-y-2">`;
+                previewHTML += `<p class="font-semibold text-gray-800 dark:text-gray-200 mb-3">将转换 ${convertedFiles.length} 个文件：</p>`;
+                
+                convertedFiles.forEach((file, index) => {
+                    const fullPath = this.rootPath + file.path;
+                    previewHTML += `
+                        <div class="p-2 bg-white dark:bg-gray-600 rounded border border-gray-200 dark:border-gray-500">
+                            <div class="flex items-center space-x-2 mb-1">
+                                <span>${this.getFileIcon(file.type)}</span>
+                                <span class="font-medium text-gray-900 dark:text-white">${file.name}</span>
+                                <span class="px-1 py-0.5 text-xs bg-gray-100 dark:bg-gray-500 text-gray-600 dark:text-gray-300 rounded">${file.type}</span>
+                            </div>
+                            <p class="text-xs text-gray-600 dark:text-gray-400">转换为：${fullPath}</p>
+                        </div>
+                    `;
+                });
+                
+                previewHTML += `</div>`;
+                previewContent.innerHTML = previewHTML;
+                previewDiv.classList.remove('hidden');
+                
+                // 存储预览数据供确认使用
+                this.pendingConversionFiles = convertedFiles;
+            }
+
+            // 确认路径转换
+            confirmPathConversion() {
+                if (!this.pendingConversionFiles) {
+                    this.showToast('没有待转换的文件', 'error');
+                    return;
+                }
+
+                this.files = [...this.files, ...this.pendingConversionFiles];
+                this.saveData();
+                this.updateAdminUI();
+                this.updateUI();
+                
+                document.getElementById('windowsPathInput').value = '';
+                document.getElementById('conversionPreview').classList.add('hidden');
+                
+                this.showToast(`成功导入 ${this.pendingConversionFiles.length} 个文件`);
+                this.pendingConversionFiles = null;
+            }
+
+            // 取消路径转换
+            cancelPathConversion() {
+                document.getElementById('conversionPreview').classList.add('hidden');
+                this.pendingConversionFiles = null;
+            }
+
+            // 解析Windows路径文本
+            parseWindowsPaths(pathText) {
+                const lines = pathText.split('\n').filter(line => line.trim());
+                const convertedFiles = [];
+                
+                for (const line of lines) {
+                    const trimmedLine = line.trim();
+                    if (trimmedLine && trimmedLine.includes('\\')) {
+                        const converted = this.convertWindowsPath(trimmedLine);
+                        if (converted) {
+                            convertedFiles.push(converted);
+                        }
+                    }
+                }
+                
+                return convertedFiles;
+            }
+
+            // 转换单个Windows路径
+            convertWindowsPath(windowsPath) {
+                if (!this.rootPath || !this.localPathPrefix) {
+                    return null;
+                }
+
+                try {
+                    // 移除本地路径前缀
+                    let relativePath = windowsPath;
+                    if (this.localPathPrefix && windowsPath.startsWith(this.localPathPrefix)) {
+                        relativePath = windowsPath.substring(this.localPathPrefix.length);
+                    }
+                    
+                    // 将反斜杠转换为正斜杠
+                    relativePath = relativePath.replace(/\\/g, '/');
+                    
+                    // 移除开头的斜杠
+                    if (relativePath.startsWith('/')) {
+                        relativePath = relativePath.substring(1);
+                    }
+                    
+                    // 提取文件名
+                    const fileName = relativePath.split('/').pop();
+                    
+                    // 确定文件类型
+                    const fileType = this.getFileTypeFromExtension(fileName);
+                    
+                    return {
+                        name: fileName,
+                        path: relativePath,
+                        type: fileType
+                    };
+                } catch (error) {
+                    console.error('转换路径失败:', error);
+                    return null;
+                }
+            }
+
+            // 从文件扩展名确定文件类型
+            getFileTypeFromExtension(fileName) {
+                const extension = fileName.toLowerCase().split('.').pop();
+                const typeMap = {
+                    'docx': 'docx',
+                    'doc': 'docx',
+                    'pdf': 'pdf',
+                    'pptx': 'pptx',
+                    'ppt': 'pptx',
+                    'xlsx': 'xlsx',
+                    'xls': 'xlsx',
+                    'txt': 'txt',
+                    'md': 'txt'
+                };
+                return typeMap[extension] || 'other';
+            }
+
+            // 批量导入文件
+            importFiles() {
+                const bulkImportText = document.getElementById('bulkImport').value.trim();
+                
+                if (!bulkImportText) {
+                    this.showToast('请输入JSON格式的文件数据', 'error');
+                    return;
+                }
+
+                try {
+                    const importedFiles = JSON.parse(bulkImportText);
+                    
+                    if (!Array.isArray(importedFiles)) {
+                        throw new Error('数据格式错误，应为数组');
+                    }
+
+                    // 验证数据格式
+                    for (const file of importedFiles) {
+                        if (!file.name || !file.path || !file.type) {
+                            throw new Error('文件数据缺少必要字段（name, path, type）');
+                        }
+                    }
+
+                    this.files = [...this.files, ...importedFiles];
+                    this.saveData();
+                    this.updateAdminUI();
+                    this.updateUI();
+                    
+                    document.getElementById('bulkImport').value = '';
+                    this.showToast(`成功导入 ${importedFiles.length} 个文件`);
+                    
+                } catch (error) {
+                    this.showToast('JSON格式错误：' + error.message, 'error');
+                }
+            }
+
+            // 添加单个文件
+            addSingleFile() {
+                const fileName = document.getElementById('fileName').value.trim();
+                const filePath = document.getElementById('filePath').value.trim();
+                const fileType = document.getElementById('fileType').value;
+
+                if (!fileName || !filePath) {
+                    this.showToast('请填写文件名和路径', 'error');
+                    return;
+                }
+
+                const newFile = {
+                    name: fileName,
+                    path: filePath,
+                    type: fileType
+                };
+
+                this.files.push(newFile);
+                this.saveData();
+                this.updateAdminUI();
+                this.updateUI();
+
+                // 清空输入框
+                document.getElementById('fileName').value = '';
+                document.getElementById('filePath').value = '';
+                document.getElementById('fileType').value = 'docx';
+
+                this.showToast('文件已添加');
+            }
+
+            // 删除文件
+            deleteFile(index) {
+                this.files.splice(index, 1);
+                this.saveData();
+                this.updateAdminUI();
+                this.updateUI();
+                this.showToast('文件已删除');
+            }
+
+            // 清空所有数据
+            clearAllData() {
+                if (confirm('确定要清空所有数据吗？此操作不可恢复。')) {
+                    this.files = [];
+                    this.rootPath = '';
+                    this.saveData();
+                    this.updateAdminUI();
+                    this.updateUI();
+                    this.showToast('所有数据已清空');
+                }
+            }
+
+            // 更新主界面UI
+            updateUI() {
+                document.getElementById('fileCount').textContent = this.files.length;
+            }
+
+            // 更新管理后台UI
+            updateAdminUI() {
+                document.getElementById('currentNetdiskPath').textContent = this.rootPath || '未设置';
+                document.getElementById('currentLocalPrefix').textContent = this.localPathPrefix || '未设置';
+                document.getElementById('adminFileCount').textContent = this.files.length;
+                document.getElementById('netdiskRootPath').value = this.rootPath;
+                document.getElementById('localPathPrefix').value = this.localPathPrefix || '';
+                
+                // 显示路径映射示例
+                this.updatePathMappingExample();
+                
+                this.updateFileList();
+            }
+
+            // 更新路径映射示例
+            updatePathMappingExample() {
+                const exampleDiv = document.getElementById('pathMappingExample');
+                
+                if (this.rootPath && this.localPathPrefix) {
+                    const examplePath = 'BaiduNetdiskDownload\\6月份7号到10号\\25.06.10更新\\低碳版村规民约.docx';
+                    const converted = this.convertWindowsPath(examplePath);
+                    
+                    if (converted) {
+                        const fullPath = this.rootPath + converted.path;
+                        exampleDiv.innerHTML = `
+                            <strong>转换示例：</strong><br>
+                            <span class="text-gray-600 dark:text-gray-400">原始路径：</span> ${examplePath}<br>
+                            <span class="text-green-600 dark:text-green-400">转换为：</span> ${fullPath}
+                        `;
+                    } else {
+                        exampleDiv.innerHTML = '<span class="text-red-500">路径映射配置有误</span>';
+                    }
+                } else {
+                    exampleDiv.innerHTML = '<span class="text-gray-500">请先设置路径映射</span>';
+                }
+            }
+
+            // 更新文件列表
+            updateFileList() {
+                const fileList = document.getElementById('fileList');
+                
+                if (this.files.length === 0) {
+                    fileList.innerHTML = '<div class="p-4 text-center text-gray-500 dark:text-gray-400">暂无文件</div>';
+                    return;
+                }
+
+                fileList.innerHTML = this.files.map((file, index) => `
+                    <div class="flex items-center justify-between p-3 border-b border-gray-200 dark:border-gray-600 last:border-b-0">
+                        <div class="flex items-center space-x-3 flex-1 min-w-0">
+                            <span class="file-icon">${this.getFileIcon(file.type)}</span>
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center space-x-2">
+                                    <p class="font-medium text-gray-900 dark:text-white truncate">${file.name}</p>
+                                    <span class="px-1 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded">${file.type}</span>
+                                </div>
+                                <p class="text-sm text-gray-500 dark:text-gray-400 truncate">${file.path}</p>
+                            </div>
+                        </div>
+                        <button 
+                            onclick="app.deleteFile(${index})" 
+                            class="text-red-600 hover:text-red-800 text-sm font-medium ml-3"
+                        >
+                            删除
+                        </button>
+                    </div>
+                `).join('');
+            }
+
+            // 显示Toast通知
+            showToast(message, type = 'success') {
+                const toast = document.getElementById('toast');
+                const toastMessage = document.getElementById('toastMessage');
+                
+                toastMessage.textContent = message;
+                toast.className = `fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 ${
+                    type === 'error' ? 'bg-red-600' : 'bg-green-600'
+                } text-white`;
+                
+                toast.classList.remove('hidden');
+                
+                setTimeout(() => {
+                    toast.classList.add('hidden');
+                }, 3000);
+            }
+        }
+
+        // 初始化应用
+        const app = new FileSearchApp();
+    </script>
+
+
+</body></html>
